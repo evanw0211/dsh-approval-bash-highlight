@@ -10,13 +10,28 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/evanw0211/dsh-approval-bash-highlight.git"
+  },
+  "homepage": "https://github.com/evanw0211/dsh-approval-bash-highlight#readme",
+  "bugs": {
+    "url": "https://github.com/evanw0211/dsh-approval-bash-highlight/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "files": [
-    "lib/index.js",
     "lib/client.js",
+    "lib/index.js",
     "client.js",
-    "cordis.patch.yml",
     "build.mjs",
-    "README.md"
+    "cordis.patch.yml",
+    "verify-install.mjs",
+    "tools/load-browser-half.mjs",
+    "docs",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "node build.mjs",

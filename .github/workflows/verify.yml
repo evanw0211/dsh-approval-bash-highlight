@@ -1,0 +1,32 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The harness drives the client module system DSH actually ships. It is on
+      # npm and has no runtime dependencies, so it installs on its own.
+      - name: Install the shipped client module system
+        run: npm install --no-save --no-package-lock --legacy-peer-deps --cache "$RUNNER_TEMP/npm-cache" @deepseek-ai/dsh-client-modules@0.1.5-rc.2
+
+      - name: Rebuild the served bundle
+        run: node build.mjs
+
+      - name: Generated bundle is current
+        run: git diff --exit-code -- lib/client.js
+
+      - name: Installation verification
+        run: node verify-install.mjs

@@ -18,12 +18,10 @@
  *
  * @module dsh-approval-bash-highlight/verify-install
  */
-import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import vm from 'node:vm'
+import { loadBrowserHalf } from './tools/load-browser-half.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -35,23 +33,6 @@ function check(label, condition, detail) {
   const suffix = detail === undefined ? '' : `  — ${detail}`
   process.stdout.write(`${condition ? 'ok  ' : 'FAIL'}  ${label}${suffix}\n`)
   return condition
-}
-
-/** Locate the shipped client module system (schema owner of the bundle format). */
-function locateClientModules() {
-  const candidates = []
-  if (process.env.DSH_INSTALL !== undefined && process.env.DSH_INSTALL !== '') candidates.push(process.env.DSH_INSTALL)
-  try {
-    candidates.push(dirname(createRequire(import.meta.url).resolve('@deepseek-ai/dsh-client-modules/package.json')))
-  } catch {}
-  try {
-    const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
-    candidates.push(join(globalRoot, '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-client-modules'))
-  } catch {}
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'package.json'))) return candidate
-  }
-  throw new Error('verify-install: cannot locate @deepseek-ai/dsh-client-modules; set DSH_INSTALL to its package directory')
 }
 
 // ---------------------------------------------------------------------------
@@ -86,21 +67,6 @@ check('host half exports apply()', typeof hostHalf.apply === 'function')
 // 2. Load the browser half through the real client module system.
 // ---------------------------------------------------------------------------
 process.stdout.write('\n# browser half through @deepseek-ai/dsh-client-modules\n')
-const clientModulesDir = locateClientModules()
-const factories = new Map()
-globalThis.window = globalThis
-globalThis.__ModuleLoader__ = {
-  load: (registration) => {
-    factories.set(registration.id, registration.factory)
-  },
-}
-await import(pathToFileURL(join(clientModulesDir, 'lib', 'client.js')).href)
-const bootstrapFactory = factories.get('@deepseek-ai/dsh-client-modules')
-check('module system bundle registered its factory', typeof bootstrapFactory === 'function', clientModulesDir)
-const clientModules = bootstrapFactory(() => {
-  throw new Error('the module-system bundle requires nothing')
-})
-check('ClientModuleSystem is exported', typeof clientModules.ClientModuleSystem === 'function')
 
 // Platform seeds: the shell hands every factory `react`, plus a `document` for
 // the stylesheet convention. Only these two are needed by this bundle.
@@ -114,36 +80,22 @@ const documentStub = {
   head: { appendChild: (tag) => styleTags.push(tag) },
 }
 
-const rowUrl = `/plugins/??${pkg.name}/client.js&rev=verify`
-const batchUrl = '/__verify_batch__'
-const boot = {
-  rev: 'verify',
-  entries: [{ id: pkg.name, url: rowUrl, rev: 'verify', inject: [], external: [] }],
-  batches: [{ phase: 'application', url: batchUrl, rev: 'verify', entries: [pkg.name] }],
-}
-const target = {
-  mode: 'queue',
-  pendingQueue: [],
-  load(registration) {
-    this.pendingQueue.push(registration)
-  },
-}
-
-const system = new clientModules.ClientModuleSystem({
-  manifest: clientModules.parseBootManifest(boot),
+let batchUrl
+const loaded = await loadBrowserHalf({
+  packageName: pkg.name,
+  clientPath,
   staticModules: { react: reactStub },
-  registrationTarget: target,
-  bootstrapModule: { id: '@deepseek-ai/dsh-client-modules', exports: clientModules },
-  loadBundle: async (url) => {
-    check('transport asked for the manifest batch URL', url === batchUrl, url)
-    const sandbox = { window: { __ModuleLoader__: target }, document: documentStub, console }
-    vm.createContext(sandbox)
-    vm.runInContext(readFileSync(clientPath, 'utf8'), sandbox, { filename: clientPath })
+  document: documentStub,
+  onBatchUrl: (url) => {
+    batchUrl = url
   },
 })
-check('facade switched to live registration', target.mode === 'live', target.mode)
+check('module system located', typeof loaded.clientModulesDir === 'string', loaded.clientModulesDir)
+check('ClientModuleSystem exported by the shipped bundle', typeof loaded.clientModules.ClientModuleSystem === 'function')
+check('facade switched to live registration', loaded.target.mode === 'live', loaded.target.mode)
+check('transport asked for the manifest batch URL', batchUrl === '/__preview_batch__', batchUrl)
 
-const bundleExports = await system.import(pkg.name)
+const bundleExports = loaded.exports
 check('bundle materialized exports.apply()', typeof bundleExports.apply === 'function')
 check(
   'bundle exports inject = ["slots"]',
@@ -188,9 +140,11 @@ check(
 process.stdout.write('\n# rendering the pending command\n')
 const command = [
   'set -e',
+  'OUT=/etc/out.txt',
   'if [ -f "$PROBE" ]; then',
-  "  printf '%s\\n' \"$PROBE\" >> /etc/out.txt 2> err",
+  "  printf '%s\\n' \"$PROBE\" >> \"$OUT\" 2> err",
   'fi',
+  'FOO=bar printf ok',
   'for i in $(seq 1 3); do echo "$i"; done',
   '',
 ].join('\n')
@@ -212,12 +166,13 @@ const spans = units.filter((child) => child?.type === 'span')
 const brs = units.filter((child) => child?.type === 'br')
 const classes = new Set(spans.map((span) => span.props.className))
 const textOf = (cls) => spans.filter((span) => span.props.className === cls).map((span) => span.children.join('')).join('')
+const label = String(tree?.children?.[0]?.children?.[0]?.children?.[0] ?? '')
 
 check('card root rendered', tree?.type === 'div' && tree.props.className === 'hl_root', tree?.props?.className)
 check('code block rendered', pre?.props?.className?.includes('hl_pre') === true, pre?.props?.className)
 check('line breaks preserved per line', brs.length === command.split('\n').length - 1, `${String(brs.length)} <br>`)
 check('indentation preserved (NBSP runs)', units.some((unit) => typeof unit === 'string' && unit.includes('\u00a0')))
-check('label reports lines and tokens', /^bash · 6 lines · \d+ tokens$/.test(String(tree?.children?.[0]?.children?.[0]?.children?.[0] ?? '')), String(tree?.children?.[0]?.children?.[0]?.children?.[0] ?? ''))
+check('label reports lines and tokens', new RegExp(`^bash · ${String(command.split('\n').length)} lines · \\d+ tokens$`).test(label), label)
 check('keywords highlighted', classes.has('shiki-token-keyword') && textOf('shiki-token-keyword').includes('if'))
 check('quoted strings highlighted', classes.has('shiki-token-string') && textOf('shiki-token-string').includes('"$PROBE"'))
 check('command substitution highlighted', classes.has('shiki-token-string-expression') && textOf('shiki-token-string-expression').includes('$(seq 1 3)'))
@@ -225,6 +180,12 @@ check('options highlighted', classes.has('shiki-token-parameter') && textOf('shi
 check('redirection operators highlighted', classes.has('shiki-token-keyword') && textOf('shiki-token-keyword').includes('>>'))
 check('numbers highlighted', classes.has('shiki-token-constant') && textOf('shiki-token-constant').includes('2'))
 check('command names distinguished', classes.has('shiki-token-function') && textOf('shiki-token-function').includes('printf'))
+check('assignments are not command names', textOf('shiki-token-parameter').includes('OUT=/etc/out.txt'))
+check(
+  'a prefix assignment does not consume the command',
+  spans.filter((span) => span.props.className === 'shiki-token-function' && span.children.join('') === 'printf').length === 2,
+  textOf('shiki-token-function'),
+)
 
 // No ambiguous fallback: a wrong id must render nothing, never another command.
 check('wrong callId renders nothing', render('call_other') === null)

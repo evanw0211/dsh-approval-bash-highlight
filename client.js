@@ -226,7 +226,14 @@ function tokenizeShell(source) {
     }
     if (token.type === 'comment') { commandPending = true; continue }
     if (token.type === 'word') {
-      const isAssignment = tokens[i + 1] !== undefined && tokens[i + 1].text === '='
+      /*
+       * `NAME=value` is one word: the word scanner accepts `=` as a word
+       * character, so `=` is never a separate token. Testing the next token for
+       * `=` can therefore never fire, and an assignment at command position
+       * used to classify as a command name. A leading assignment does NOT open
+       * a command (`FOO=bar ls` runs `ls`), so `commandPending` is left alone.
+       */
+      const isAssignment = /^[A-Za-z_][A-Za-z0-9_]*=/.test(token.text)
       if (isAssignment) token.type = 'parameter'
       else if (token.text.charAt(0) === '-') token.type = 'parameter'
       /*
