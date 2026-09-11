@@ -1,0 +1,35 @@
+{
+  "name": "dsh-approval-bash-highlight",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Approval-card shell syntax highlighting for DSH: resolves the pending command by callId from legacy.runningCalls and renders it with the theme's own shiki tokens.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "client.js",
+    "cordis.patch.yml",
+    "build.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "verify": "node verify-install.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,6 @@
+# The plugin is loaded by path (or installed) with the harness providing its
+# runtime; a local node_modules is only ever a symlink into that install.
+node_modules
+*.log
+*.bak
+.DS_Store

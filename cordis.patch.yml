@@ -1,0 +1,15 @@
+# Profile patch layer shipped with this package.
+#
+# `dsh plugin --profile <name> add <path-or-git-url-or-tarball>` installs this
+# package as a profile dependency; the CLI then reconciles the dependency into
+# `dsh.profile.bundles` because the manifest declares `dsh.bundle.patch`, and
+# this layer is applied after the shipped bundles.
+#
+# The row resolves from the profile's own node_modules, so nothing here is
+# machine-specific. For a checkout used in place (no pnpm install), point
+# `name:` at the absolute path of `lib/index.js` instead — the Loader and
+# `@deepseek-ai/dsh-client-modules` both accept a path row, and the client half
+# is found through the nearest ancestor package.json.
+- insert:
+    - id: approval-bash-highlight
+      name: dsh-approval-bash-highlight
